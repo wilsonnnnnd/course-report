@@ -5,11 +5,11 @@ require_once __DIR__ . '/../../src/queries.php';
 
 // Read pagination values from the query string (GET parameters).
 // force numbers and use safe defaults to avoid invaild input.
-$page     = max(1, (int)($_GET['page'] ?? 1));
+$page = max(1, (int)($_GET['page'] ?? 1));
 // pageSize: default 25, minimum 10, maximum 50
 $pageSize = min(50, max(10, (int)($_GET['pageSize'] ?? 25)));
 // Calculate offset for SQL LIMIT/OFFSET
-$offset   = ($page - 1) * $pageSize;
+$offset = ($page - 1) * $pageSize;
 
 // Read filter inputs. Use trim on search to remove extra spaces.
 $search = trim($_GET['search'] ?? '');
