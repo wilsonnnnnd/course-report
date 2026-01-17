@@ -13,22 +13,32 @@ $offset   = ($page - 1) * $pageSize;
 
 // Read filter inputs. Use trim on search to remove extra spaces.
 $search = trim($_GET['search'] ?? '');
+// Minimum 2 search length to apply filtering 
+$minSearchLen = 2;
+
+// Use mb_strlen when available, fall back to strlen to avoid fatal errors
+$searchLen = function_exists('mb_strlen') ? mb_strlen($search) : strlen($search);
+
 $status = $_GET['status'] ?? '';
 
 // Build WHERE clauses and parameter map for prepared statements.
 $where = [];
 $params = [];
 
-// If the user provided a search term, match it against first name,
-// last name, or course description using LIKE.
-if ($search !== '') {
-    $where[] = "(u.first_name LIKE :q OR u.last_name LIKE :q OR c.description LIKE :q)";
-    // Use wildcard search and bind as parameter to prevent SQL injection.
-    $params[':q'] = "%$search%";
+// If the user provided a search term, match it using PREFIX LIKE so indexes can be used.
+if ($search !== '' && $searchLen >= $minSearchLen) {
+    $where[] = "(
+        u.last_name LIKE :q
+        OR u.first_name LIKE :q
+        OR c.description LIKE :q
+    )";
+    // Prefix matching: can use B-Tree indexes (Route A)
+    $params[':q'] = $search . '%';
 }
 
 // If a status filter is provided, add it to the WHERE clause.
-if ($status !== '') {
+$allowedStatuses = ['completed', 'in progress', 'not started'];
+if (in_array($status, $allowedStatuses, true)) {
     $where[] = "e.completion_status = :status";
     $params[':status'] = $status;
 }
@@ -39,8 +49,12 @@ $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 // Prepare and run a COUNT query to get the total number of rows
 // that match the filters. This is used for pagination metadata.
 $stmt = $pdo->prepare(enrolments_total_sql($whereSql));
-// Execute count query with any bound search/status params
-$stmt->execute($params);
+// Bind parameters robustly (accepts both 'q' and ':q' keys)
+foreach ($params as $k => $v) {
+    $paramName = is_string($k) && strpos($k, ':') === 0 ? $k : ':' . ltrim((string)$k, ':');
+    $stmt->bindValue($paramName, $v);
+}
+$stmt->execute();
 $total = (int)$stmt->fetchColumn();
 
 // Get the data SQL. The helper will include LIMIT and OFFSET
@@ -68,7 +82,11 @@ $dataSql = enrolments_data_sql($whereSql, (int)$pageSize, (int)$offset, $orderSq
 // search/status parameters so the data matches the count.
 // LIMIT/OFFSET are safe because they were inlined as integers.
 $stmt = $pdo->prepare($dataSql);
-$stmt->execute($params);
+foreach ($params as $k => $v) {
+    $paramName = is_string($k) && strpos($k, ':') === 0 ? $k : ':' . ltrim((string)$k, ':');
+    $stmt->bindValue($paramName, $v);
+}
+$stmt->execute();
 
 // Return JSON with pagination metadata and the result rows.
 // Using json_encode ensures proper JSON output for the API.
